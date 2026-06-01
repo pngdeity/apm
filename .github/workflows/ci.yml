@@ -82,6 +82,42 @@ jobs:
     - name: Lint - auth-protocol boundary (#1212 anti-regression)
       run: bash scripts/lint-auth-signals.sh
 
+  docs-validation:
+    name: Docs Validation
+    runs-on: ubuntu-24.04
+    permissions:
+    contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+    uses: actions/setup-python@v5
+    with:
+      python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install uv
+    uses: astral-sh/setup-uv@v6
+    with:
+      enable-cache: true
+
+    - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '22'
+      cache: 'npm'
+      cache-dependency-path: 'docs/package-lock.json'
+
+    - name: Install Python dependencies
+    run: uv sync --extra dev
+
+    - name: Install docs dependencies
+    working-directory: ./docs
+    run: npm ci
+
+    - name: Run docs validation gate
+    run: make docs-validate
+
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
   # Two-way sharded with pytest-split, mirroring the pattern proven in

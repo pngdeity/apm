@@ -136,6 +136,31 @@ This is optional -- CI is the authoritative gate. The pre-commit hook rev may la
 
 If your changes affect how users interact with the project, update the documentation accordingly.
 
+### Documentation validation policy
+
+APM has one canonical docs-quality gate:
+
+```bash
+make docs-validate
+```
+
+This command validates all in-scope documentation sources:
+
+- `docs/src/content/docs/**/*.md` and `docs/src/content/docs/**/*.mdx`
+- `README.md` and `CONTRIBUTING.md`
+- `packages/**/*.md`
+
+`make docs-validate` runs these checks:
+
+- Internal link validation (including relative target resolution and heading fragment checks)
+- Required docs-page frontmatter shape for Starlight content (`title` and `description`)
+- Docs/CLI cross-reference lockstep checks (`tests/unit/policy/test_help_consistency.py`)
+- Full docs site build (`npm --prefix docs run build`, including `starlight-links-validator`)
+
+Allowed exceptions are intentionally narrow and currently limited to synthetic
+markdown fixtures / prompt assets under package eval or asset paths where
+example links are expected to be incomplete.
+
 ## License
 
 By contributing to this project, you agree that your contributions will be licensed under the project's [MIT License](https://github.com/microsoft/apm/blob/main/LICENSE).
