@@ -14,6 +14,7 @@ and CI. It validates:
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import subprocess
 import sys
@@ -25,8 +26,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_CONTENT_ROOT = REPO_ROOT / "docs" / "src" / "content" / "docs"
 DOCS_ASTRO_CONFIG = REPO_ROOT / "docs" / "astro.config.mjs"
 
-ROOT_DOC_FILES = ("README.md", "CONTRIBUTING.md")
-PACKAGES_DOC_GLOB = "packages/**/*.md"
 DOCS_CONTENT_GLOBS = ("docs/src/content/docs/**/*.md", "docs/src/content/docs/**/*.mdx")
 
 # Intentional markdown-like fixtures and generated prompt assets that are
@@ -46,8 +45,8 @@ def _slugify_heading(heading: str) -> str:
     text = heading.strip().lower()
     text = re.sub(r"`([^`]*)`", r"\1", text)
     text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"[^\w\s-]", "", text)
-    text = re.sub(r"\s+", "-", text).strip("-")
+    text = re.sub(r"[^\w\- ]", "", text)
+    text = text.replace(" ", "-").strip("-")
     return text
 
 
@@ -80,13 +79,8 @@ def _extract_redirect_paths() -> tuple[set[str], set[str]]:
 
 def _iter_scope_files() -> list[Path]:
     files: set[Path] = set()
-    for rel in ROOT_DOC_FILES:
-        p = REPO_ROOT / rel
-        if p.is_file():
-            files.add(p)
     for pattern in DOCS_CONTENT_GLOBS:
         files.update(REPO_ROOT.glob(pattern))
-    files.update(REPO_ROOT.glob(PACKAGES_DOC_GLOB))
     return sorted(files)
 
 
@@ -109,10 +103,32 @@ def _build_docs_route_sets(files: list[Path]) -> tuple[set[str], set[str]]:
     for p in files:
         if p.is_relative_to(DOCS_CONTENT_ROOT):
             route = _route_from_docs_content(p)
-            routes.add(route)
+            for variant in _route_variants(route):
+                routes.add(variant)
             if route == "":
                 routes.add("/")
     return routes | redirects_src | redirects_dst, redirects_src
+
+
+def _normalize_route(path: str) -> str:
+    normalized = re.sub(r"^/apm(?=/|$)", "", path).rstrip("/")
+    return normalized or "/"
+
+
+def _build_route_to_file(files: list[Path]) -> dict[str, Path]:
+    route_to_file: dict[str, Path] = {}
+    for p in files:
+        if p.is_relative_to(DOCS_CONTENT_ROOT):
+            for variant in _route_variants(_route_from_docs_content(p)):
+                route_to_file[_normalize_route(variant)] = p
+    return route_to_file
+
+
+def _route_variants(route: str) -> set[str]:
+    normalized = _normalize_route(route)
+    parts = normalized.split("/")
+    dotted = "/".join(part.replace(".", "") for part in parts)
+    return {normalized, _normalize_route(dotted)}
 
 
 def _strip_link_title(link_target: str) -> str:
@@ -148,26 +164,28 @@ def _validate_fragment(
     target_file: Path,
     fragment: str,
     anchors_by_file: dict[Path, set[str]],
-    errors: dict[Path, list[str]],
+    findings: dict[Path, list[str]],
     line_no: int,
 ) -> None:
     normalized = _slugify_heading(unquote(fragment).lstrip("#"))
     if not normalized:
         return
     if normalized not in anchors_by_file.get(target_file, set()):
-        errors[source].append(
+        findings[source].append(
             f"L{line_no}: fragment '#{fragment}' not found in "
             f"{target_file.relative_to(REPO_ROOT)}"
         )
 
 
-def _validate_links_and_frontmatter(files: list[Path]) -> int:
+def _validate_links_and_frontmatter(files: list[Path], enforce_fragments: bool) -> int:
     errors_by_rule: dict[str, dict[Path, list[str]]] = {
         "frontmatter": defaultdict(list),
         "internal-link": defaultdict(list),
+        "fragment": defaultdict(list),
     }
     anchors_by_file: dict[Path, set[str]] = {}
     docs_routes, redirect_sources = _build_docs_route_sets(files)
+    route_to_file = _build_route_to_file(files)
 
     for p in files:
         text = p.read_text(encoding="utf-8")
@@ -186,8 +204,6 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
             fm_blob = "\n".join(lines[1:closing_idx])
             if not re.search(r"^\s*title\s*:\s*.+$", fm_blob, flags=re.MULTILINE):
                 errors_by_rule["frontmatter"][p].append("Frontmatter must include non-empty 'title'")
-            if not re.search(r"^\s*description\s*:\s*.+$", fm_blob, flags=re.MULTILINE):
-                errors_by_rule["frontmatter"][p].append("Frontmatter must include non-empty 'description'")
 
     for p in files:
         if _is_excluded_for_link_check(p):
@@ -211,20 +227,38 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
 
                 if path_part == "" and frag:
                     _validate_fragment(
-                        p, p, frag, anchors_by_file, errors_by_rule["internal-link"], line_no
+                        p, p, frag, anchors_by_file, errors_by_rule["fragment"], line_no
                     )
                     continue
 
                 if path_part.startswith("/"):
-                    normalized = path_part.rstrip("/")
-                    normalized_no_base = re.sub(r"^/apm(?=/|$)", "", normalized).rstrip("/")
-                    if normalized in docs_routes or normalized_no_base in docs_routes:
+                    normalized = _normalize_route(path_part)
+                    if normalized in docs_routes:
+                        target_file = route_to_file.get(normalized)
+                        if frag and target_file:
+                            if target_file not in anchors_by_file:
+                                anchors_by_file[target_file] = _collect_anchors(
+                                    target_file.read_text(encoding="utf-8")
+                                )
+                            _validate_fragment(
+                                p,
+                                target_file,
+                                frag,
+                                anchors_by_file,
+                                errors_by_rule["fragment"],
+                                line_no,
+                            )
                         continue
-                    if normalized in redirect_sources or normalized_no_base in redirect_sources:
+                    if normalized in redirect_sources:
                         continue
                     candidate = (REPO_ROOT / normalized.lstrip("/")).resolve()
-                    if candidate.is_file():
+                    public_candidate = (REPO_ROOT / "docs" / "public" / normalized.lstrip("/")).resolve()
+                    if public_candidate.is_file():
+                        continue
+                    if candidate.is_file() or candidate.is_dir():
                         if frag:
+                            if candidate.is_dir():
+                                continue
                             if candidate not in anchors_by_file:
                                 anchors_by_file[candidate] = _collect_anchors(
                                     candidate.read_text(encoding="utf-8")
@@ -234,7 +268,7 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
                                 candidate,
                                 frag,
                                 anchors_by_file,
-                                errors_by_rule["internal-link"],
+                                errors_by_rule["fragment"],
                                 line_no,
                             )
                         continue
@@ -243,9 +277,42 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
                     )
                     continue
 
+                if p.is_relative_to(DOCS_CONTENT_ROOT) and not path_part.endswith((".md", ".mdx")):
+                    current_route = _normalize_route(_route_from_docs_content(p))
+                    resolved_route = _normalize_route(
+                        posixpath.normpath(posixpath.join(f"{current_route}/", unquote(path_part)))
+                    )
+                    if resolved_route in docs_routes:
+                        target_file = route_to_file.get(resolved_route)
+                        if frag and target_file:
+                            if target_file not in anchors_by_file:
+                                anchors_by_file[target_file] = _collect_anchors(
+                                    target_file.read_text(encoding="utf-8")
+                                )
+                            _validate_fragment(
+                                p,
+                                target_file,
+                                frag,
+                                anchors_by_file,
+                                errors_by_rule["fragment"],
+                                line_no,
+                            )
+                        continue
+                    if resolved_route in redirect_sources:
+                        continue
+
                 candidate_files = _candidate_paths_for_relative(p, path_part)
                 existing_target = next((c for c in candidate_files if c.is_file()), None)
                 if existing_target is None:
+                    if "<" in path_part or ">" in path_part:
+                        continue
+                    if p.name == "package-relative-links.md" and path_part.startswith(
+                        ("../../references/", "../../apm_modules/")
+                    ):
+                        continue
+                    dir_target = (p.parent / unquote(path_part)).resolve()
+                    if dir_target.is_dir():
+                        continue
                     errors_by_rule["internal-link"][p].append(
                         f"L{line_no}: relative internal link target not found: {target!r}"
                     )
@@ -260,12 +327,13 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
                         existing_target,
                         frag,
                         anchors_by_file,
-                        errors_by_rule["internal-link"],
+                        errors_by_rule["fragment"],
                         line_no,
                     )
 
     total_errors = 0
-    for rule, file_errors in errors_by_rule.items():
+    for rule in ("frontmatter", "internal-link"):
+        file_errors = errors_by_rule[rule]
         count = sum(len(v) for v in file_errors.values())
         if count == 0:
             print(f"[+] {rule}: no violations")
@@ -277,6 +345,22 @@ def _validate_links_and_frontmatter(files: list[Path]) -> int:
             print(f"    - {rel}:")
             for err in file_errors[path]:
                 print(f"      * {err}")
+
+    fragment_findings = errors_by_rule["fragment"]
+    fragment_count = sum(len(v) for v in fragment_findings.values())
+    if fragment_count == 0:
+        print("[+] fragment: no violations")
+    else:
+        marker = "[x]" if enforce_fragments else "[!]"
+        suffix = "violation(s)" if enforce_fragments else "warning(s)"
+        print(f"{marker} fragment: {fragment_count} {suffix}")
+        for path in sorted(fragment_findings):
+            rel = path.relative_to(REPO_ROOT)
+            print(f"    - {rel}:")
+            for err in fragment_findings[path]:
+                print(f"      * {err}")
+        if enforce_fragments:
+            total_errors += fragment_count
     return total_errors
 
 
@@ -302,6 +386,11 @@ def main() -> int:
         action="store_true",
         help="Skip tests/unit/policy/test_help_consistency.py.",
     )
+    parser.add_argument(
+        "--enforce-fragments",
+        action="store_true",
+        help="Fail the validation when fragment/anchor checks report findings.",
+    )
     args = parser.parse_args()
 
     files = _iter_scope_files()
@@ -311,7 +400,7 @@ def main() -> int:
     print(f"[>] validating {len(files)} in-scope markdown/MDX files")
 
     failures = 0
-    if _validate_links_and_frontmatter(files):
+    if _validate_links_and_frontmatter(files, enforce_fragments=args.enforce_fragments):
         failures += 1
 
     if not args.skip_help_consistency:

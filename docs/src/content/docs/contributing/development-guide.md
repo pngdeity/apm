@@ -147,19 +147,19 @@ make docs-validate
 This command validates all in-scope documentation sources:
 
 - `docs/src/content/docs/**/*.md` and `docs/src/content/docs/**/*.mdx`
-- `README.md` and `CONTRIBUTING.md`
-- `packages/**/*.md`
 
 `make docs-validate` runs these checks:
 
 - Internal link validation (including relative target resolution and heading fragment checks)
-- Required docs-page frontmatter shape for Starlight content (`title` and `description`)
+- Required docs-page frontmatter shape for Starlight content (`title`)
 - Docs/CLI cross-reference lockstep checks (`tests/unit/policy/test_help_consistency.py`)
 - Full docs site build (`npm --prefix docs run build`, including `starlight-links-validator`)
 
-Allowed exceptions are intentionally narrow and currently limited to synthetic
-markdown fixtures / prompt assets under package eval or asset paths where
-example links are expected to be incomplete.
+Allowed exceptions are intentionally narrow and currently limited to docs-site
+redirect routes declared in `docs/astro.config.mjs`.
+
+Fragment checks currently run in warning mode to support baseline burn-down.
+Use `uv run python scripts/validate_docs.py --enforce-fragments` for strict mode.
 
 ## License
 

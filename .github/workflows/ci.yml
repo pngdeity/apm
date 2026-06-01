@@ -86,37 +86,37 @@ jobs:
     name: Docs Validation
     runs-on: ubuntu-24.04
     permissions:
-    contents: read
+      contents: read
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python
-    uses: actions/setup-python@v5
-    with:
-      python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
 
-    - name: Install uv
-    uses: astral-sh/setup-uv@v6
-    with:
-      enable-cache: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
-    - name: Setup Node.js
-    uses: actions/setup-node@v4
-    with:
-      node-version: '22'
-      cache: 'npm'
-      cache-dependency-path: 'docs/package-lock.json'
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'docs/package-lock.json'
 
-    - name: Install Python dependencies
-    run: uv sync --extra dev
+      - name: Install Python dependencies
+        run: uv sync --extra dev
 
-    - name: Install docs dependencies
-    working-directory: ./docs
-    run: npm ci
+      - name: Install docs dependencies
+        working-directory: ./docs
+        run: npm ci
 
-    - name: Run docs validation gate
-    run: make docs-validate
+      - name: Run docs validation gate
+        run: make docs-validate
 
   # Linux-only for PR feedback. Full platform matrix (incl. macOS + Windows) runs post-merge in build-release.yml.
   #
