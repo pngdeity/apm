@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Teams with existing `AGENTS.md` content can now adopt `apm compile` without
+  losing hand-written rules: set `compilation.agents_md.mode: managed_section`
+  in `apm.yml` to update only the APM-owned block between configurable markers.
+  Missing or duplicate markers raise a loud error so no content is silently
+  lost. (closes #1540)
 - `apm publish` auto-pack now includes `README.md`, `CHANGELOG.md`, and `LICENSE` / `LICENCE` (case-insensitive, symlinks excluded) in the flat registry archive, matching npm's behaviour of bundling standard root-level documentation files alongside the package source.
 
 ## [0.16.1] - 2026-06-01
