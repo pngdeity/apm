@@ -554,6 +554,8 @@ def _glob_match_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...
     """
     memo: dict[tuple[int, int], bool] = {}
 
+    _is_windows = os.name == "nt"
+
     def _match(pi: int, qi: int) -> bool:
         key = (pi, qi)
         if key in memo:
@@ -577,6 +579,22 @@ def _glob_match_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...
         if pi >= len(path_parts):
             memo[key] = False
             return False
+
+        # Fast path for exact string match without wildcards.
+        if '*' not in current and '?' not in current and '[' not in current:
+            # Use platform-aware comparison for Windows so matching remains
+            # case-insensitive, consistent with prior glob.glob() behavior.
+            if _is_windows:
+                match_str = path_parts[pi].lower() == current.lower()
+            else:
+                match_str = path_parts[pi] == current
+
+            if not match_str:
+                memo[key] = False
+                return False
+            result = _match(pi + 1, qi + 1)
+            memo[key] = result
+            return result
 
         # Use platform-aware fnmatch semantics so Windows matching remains
         # case-insensitive, consistent with prior glob.glob() behavior.
