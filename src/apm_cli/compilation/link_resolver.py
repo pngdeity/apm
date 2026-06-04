@@ -23,6 +23,10 @@ set = builtins.set
 list = builtins.list
 dict = builtins.dict
 
+# Regex for markdown links: [text](path)
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_INLINEABLE_EXTS = {".md", ".txt"}
+
 
 @dataclass
 class LinkResolutionContext:
@@ -53,9 +57,6 @@ class UnifiedLinkResolver:
     - Rewriting links to point directly to source locations
     - No copying needed - links point to actual files
     """
-
-    # Regex for markdown links: [text](path)
-    LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
     # Context file extensions we handle
     CONTEXT_EXTENSIONS = {".context.md", ".memory.md"}  # noqa: RUF012
@@ -247,7 +248,7 @@ class UnifiedLinkResolver:
 
             return match.group(0)
 
-        return self.LINK_PATTERN.sub(replace_link, content)
+        return _MARKDOWN_LINK_RE.sub(replace_link, content)
 
     def _extract_context_references(self, content: str, source_file: Path) -> builtins.set[Path]:
         """Extract all context file references from content.
@@ -261,7 +262,7 @@ class UnifiedLinkResolver:
         """
         references: builtins.set[Path] = builtins.set()
 
-        for match in self.LINK_PATTERN.finditer(content):
+        for match in _MARKDOWN_LINK_RE.finditer(content):
             link_path = match.group(2)
 
             # Skip external URLs and non-context files
@@ -540,9 +541,6 @@ def resolve_markdown_links(content: str, base_path: Path) -> str:
     Returns:
         str: Content with resolved links and inlined content where appropriate.
     """
-    # Pattern to match markdown links: [text](path)
-    link_pattern = r"\[([^\]]+)\]\(([^)]+)\)"
-
     def replace_link(match):
         text = match.group(1)
         path = match.group(2)
@@ -560,7 +558,7 @@ def resolve_markdown_links(content: str, base_path: Path) -> str:
 
         if full_path and full_path.exists() and full_path.is_file():
             # For certain file types, inline the content
-            if full_path.suffix.lower() in [".md", ".txt"]:
+            if full_path.suffix.lower() in _INLINEABLE_EXTS:
                 try:
                     file_content = full_path.read_text(encoding="utf-8")
                     # Remove frontmatter if present
@@ -576,7 +574,7 @@ def resolve_markdown_links(content: str, base_path: Path) -> str:
             # File doesn't exist, keep original link (will be caught by validation)
             return match.group(0)
 
-    return re.sub(link_pattern, replace_link, content)
+    return _MARKDOWN_LINK_RE.sub(replace_link, content)
 
 
 def validate_link_targets(content: str, base_path: Path) -> builtins.list[str]:
@@ -592,8 +590,7 @@ def validate_link_targets(content: str, base_path: Path) -> builtins.list[str]:
     errors = []
 
     # Check markdown links
-    link_pattern = r"\[([^\]]+)\]\(([^)]+)\)"
-    for match in re.finditer(link_pattern, content):
+    for match in _MARKDOWN_LINK_RE.finditer(content):
         text = match.group(1)
         path = match.group(2)
 
@@ -694,8 +691,7 @@ def _detect_circular_references(
     visited.add(current_file)
 
     # Check markdown links for potential circular references
-    link_pattern = r"\[([^\]]+)\]\(([^)]+)\)"
-    for match in re.finditer(link_pattern, content):
+    for match in _MARKDOWN_LINK_RE.finditer(content):
         path = match.group(2)
 
         # Skip external URLs and anchors
@@ -704,7 +700,7 @@ def _detect_circular_references(
 
         full_path = _resolve_path(path, base_path.parent if base_path.is_file() else base_path)
         if full_path and full_path.exists() and full_path.is_file():
-            if full_path.suffix.lower() in [".md", ".txt"]:
+            if full_path.suffix.lower() in _INLINEABLE_EXTS:
                 try:
                     linked_content = full_path.read_text(encoding="utf-8")
                     errors.extend(
