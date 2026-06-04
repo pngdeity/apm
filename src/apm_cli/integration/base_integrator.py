@@ -12,6 +12,9 @@ from apm_cli.primitives.discovery import discover_primitives
 from apm_cli.utils.console import _rich_warning
 
 
+_LINK_TARGET_RE = re.compile(r"\]\(([^)]+)\)")
+
+
 class _SymlinkRaceError(OSError):
     """Raised by ``_read_bytes_no_follow`` when the path becomes a symlink
     between the pre-check and the open(). Caught locally; never bubbles."""
@@ -627,9 +630,8 @@ class BaseIntegrator:
         if resolved == content:
             return content, 0
 
-        link_pattern = re.compile(r"\]\(([^)]+)\)")
-        original_links = set(link_pattern.findall(content))
-        resolved_links = set(link_pattern.findall(resolved))
+        original_links = set(_LINK_TARGET_RE.findall(content))
+        resolved_links = set(_LINK_TARGET_RE.findall(resolved))
         return resolved, len(original_links - resolved_links)
 
     # ------------------------------------------------------------------

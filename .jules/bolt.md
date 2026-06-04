@@ -1,0 +1,3 @@
+## 2024-06-04 - Repeated Regex Compilation in Markdown Link Resolvers
+**Learning:** Python's `re` module caches compiled regexes, but frequently repeatedly calling `re.finditer` and `re.sub` inside deeply nested code paths (like parsing and compiling markdown links) still incurs lookup overhead.
+**Action:** Always extract common regular expressions (like `\[([^\]]+)\]\(([^)]+)\)`) to module-level constants `_MARKDOWN_LINK_RE = re.compile(...)`. Same for frequently checked literal lists (e.g., extensions `[".md", ".txt"]`) -> use module-level sets `_INLINEABLE_EXTS = {".md", ".txt"}` for O(1) lookups and to avoid re-allocating memory during runtime loops.
