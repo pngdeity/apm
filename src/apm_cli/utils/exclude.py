@@ -73,15 +73,16 @@ def should_exclude(
         return False
 
     try:
-        resolved = file_path.resolve()
-    except (OSError, FileNotFoundError):
-        resolved = file_path.absolute()
-    try:
-        rel_path = resolved.relative_to(base_dir.resolve())
+        # Use os.path.relpath for fast string-based relative path computation
+        # instead of Path.resolve() which performs expensive stat/readlink syscalls.
+        # file_path and base_dir must be strings or os.PathLike objects.
+        rel_path_str = os.path.relpath(str(file_path), str(base_dir)).replace(os.sep, "/")
+
+        # If the file is not under base_dir, it cannot match our relative patterns.
+        if rel_path_str.startswith("../") or rel_path_str == "..":
+            return False
     except ValueError:
         return False
-
-    rel_path_str = str(rel_path).replace(os.sep, "/")
 
     for pattern in exclude_patterns:  # noqa: SIM110
         if _matches_pattern(rel_path_str, pattern):
