@@ -174,12 +174,8 @@ class ContextOptimizer:
     def _cached_glob(self, pattern: str) -> builtins.list[str]:
         """Cache glob results to avoid repeated filesystem scans."""
         if pattern not in self._glob_cache:
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(str(self.base_dir))  # Convert Path to string for os.chdir
-                self._glob_cache[pattern] = glob.glob(pattern, recursive=True)
-            finally:
-                os.chdir(old_cwd)
+            # glob.glob root_dir is faster than changing directories and avoids race conditions
+            self._glob_cache[pattern] = glob.glob(pattern, root_dir=self.base_dir, recursive=True)
         return self._glob_cache[pattern]
 
     def _get_all_files(self) -> builtins.list[Path]:
@@ -450,10 +446,14 @@ class ContextOptimizer:
 
             # Calculate depth for analysis
             try:
-                relative_path = current_path.resolve().relative_to(self.base_dir.resolve())
+                relative_path = current_path.relative_to(self.base_dir)
                 depth = len(relative_path.parts)
             except ValueError:
-                depth = 0
+                try:
+                    relative_path = current_path.resolve().relative_to(self.base_dir.resolve())
+                    depth = len(relative_path.parts)
+                except ValueError:
+                    depth = 0
 
             # Skip hidden directories and common ignore patterns
             if any(part.startswith(".") for part in current_path.parts[len(self.base_dir.parts) :]):
@@ -1073,9 +1073,13 @@ class ContextOptimizer:
             return None
 
         # Convert to relative paths for easier analysis
-        relative_dirs = [
-            d.resolve().relative_to(self.base_dir.resolve()) for d in matching_directories
-        ]
+        relative_dirs = []
+        for d in matching_directories:
+            try:
+                rel = d.relative_to(self.base_dir)
+            except ValueError:
+                rel = d.resolve().relative_to(self.base_dir.resolve())
+            relative_dirs.append(rel)
 
         # Find the lowest common ancestor that covers all directories
         if len(relative_dirs) == 1:
@@ -1131,11 +1135,15 @@ class ContextOptimizer:
         """
         try:
             # Check if target is the same as placement or is a subdirectory of placement
-            target_dir.resolve().relative_to(placement_dir.resolve())
+            target_dir.relative_to(placement_dir)
             return True
         except ValueError:
-            # target_dir is not under placement_dir
-            return False
+            try:
+                target_dir.resolve().relative_to(placement_dir.resolve())
+                return True
+            except ValueError:
+                # target_dir is not under placement_dir
+                return False
 
     def _calculate_coverage_efficiency(self, directory: Path, pattern: str) -> float:
         """Calculate how well placement covers actual usage."""
@@ -1250,10 +1258,14 @@ class ContextOptimizer:
             bool: True if child is subdirectory of parent.
         """
         try:
-            child.resolve().relative_to(parent.resolve())
-            return child.resolve() != parent.resolve()
+            rel = child.relative_to(parent)
+            return len(rel.parts) > 0
         except ValueError:
-            return False
+            try:
+                rel = child.resolve().relative_to(parent.resolve())
+                return len(rel.parts) > 0
+            except ValueError:
+                return False
 
     def _is_instruction_relevant(self, instruction: Instruction, working_directory: Path) -> bool:
         """Check if instruction is relevant for the working directory.
