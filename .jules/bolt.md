@@ -1,0 +1,3 @@
+## 2024-06-06 - Optimize context optimizer pathlib operations
+**Learning:** `Path.resolve()` triggers `stat` operations that are expensive to run inside a loop like traversing an entire project. `glob.glob` `root_dir` argument (available in Python 3.10+) is significantly faster than using `os.chdir` to achieve directory-specific globs, since it doesn't change global process state and limits filesystem access overhead.
+**Action:** When comparing paths with `relative_to()`, try `path.relative_to(base)` first and only fall back to `.resolve()` if that throws `ValueError`. Use `root_dir` parameter for `glob.glob` instead of `os.chdir` when applicable.
