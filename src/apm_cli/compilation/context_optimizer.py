@@ -24,6 +24,7 @@ from ..output.models import (
     PlacementSummary,
     ProjectAnalysis,
 )
+from ..primitives.discovery import _glob_match
 from ..primitives.models import Instruction
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
@@ -738,36 +739,27 @@ class ContextOptimizer:
         expanded_patterns = self._expand_glob_pattern(pattern)
 
         for expanded_pattern in expanded_patterns:
-            # For patterns with **, use cached glob results
-            if "**" in expanded_pattern:
-                try:
-                    # Resolve both paths to handle symlinks and path inconsistencies
-                    resolved_file = file_path.resolve()
-                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+            try:
+                # Resolve paths first to check if file is within base_dir.
+                # portable_relpath returns an absolute path if not under base,
+                # which we want to explicitly catch as a ValueError like the original code did.
+                file_resolved = file_path.resolve()
+                base_resolved = self.base_dir.resolve()
 
-                    # Use cached glob results instead of repeated glob calls
-                    matches = self._cached_glob(expanded_pattern)
-                    # Use cached Set[Path] to avoid recreating on every call
-                    if expanded_pattern not in self._glob_set_cache:
-                        self._glob_set_cache[expanded_pattern] = {Path(match) for match in matches}
-                    if rel_path in self._glob_set_cache[expanded_pattern]:
-                        return True
-                except (ValueError, OSError):
-                    pass
-            else:
-                # For non-recursive patterns, use fnmatch as before
-                try:
-                    rel_str = portable_relpath(file_path, self.base_dir)
-                    if fnmatch.fnmatch(rel_str, expanded_pattern):
-                        return True
-                except ValueError:
-                    pass
+                # This will raise ValueError if file is not under base
+                file_resolved.relative_to(base_resolved)
+
+                rel_str = portable_relpath(file_path, self.base_dir)
+                if _glob_match(rel_str, expanded_pattern):
+                    return True
 
                 # Only use filename match for patterns without directory structure
                 # This prevents "docs/**/*.md" from matching any "*.md" file anywhere
                 if "/" not in expanded_pattern:
                     if fnmatch.fnmatch(file_path.name, expanded_pattern):
                         return True
+            except (ValueError, OSError):
+                pass
 
         return False
 

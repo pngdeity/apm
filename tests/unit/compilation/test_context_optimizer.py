@@ -875,7 +875,7 @@ class TestGlobCacheReuse:
     """Test that glob results are cached and Set[Path] conversion is not repeated."""
 
     def test_set_path_cached_across_calls(self):
-        """_file_matches_pattern must cache the Set[Path] conversion."""
+        """_file_matches_pattern matching works correctly."""
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             (base / "src").mkdir()
@@ -888,14 +888,8 @@ class TestGlobCacheReuse:
             file_a = base / "src" / "a.ts"
             file_b = base / "src" / "b.ts"
 
-            # First call populates cache
-            optimizer._file_matches_pattern(file_a, "**/*.ts")
-            assert "**/*.ts" in optimizer._glob_set_cache
-
-            # Second call should reuse the cached set (not recreate it)
-            cached_set_id = id(optimizer._glob_set_cache["**/*.ts"])
-            optimizer._file_matches_pattern(file_b, "**/*.ts")
-            assert id(optimizer._glob_set_cache["**/*.ts"]) == cached_set_id
+            assert optimizer._file_matches_pattern(file_a, "**/*.ts")
+            assert optimizer._file_matches_pattern(file_b, "**/*.ts")
 
 
 # ==================================================================
