@@ -554,33 +554,51 @@ def _glob_match_parts(path_parts: tuple[str, ...], pattern_parts: tuple[str, ...
     """
     memo: dict[tuple[int, int], bool] = {}
 
+    path_len = len(path_parts)
+    pattern_len = len(pattern_parts)
+
     def _match(pi: int, qi: int) -> bool:
         key = (pi, qi)
         if key in memo:
             return memo[key]
 
-        if qi == len(pattern_parts):
-            result = pi == len(path_parts)
+        if qi == pattern_len:
+            result = pi == path_len
             memo[key] = result
             return result
 
         current = pattern_parts[qi]
 
         if current == "**":
+            # Fast path for terminal **
+            if qi == pattern_len - 1:
+                return True
+
             # ** matches zero segments, OR consumes one segment and stays at **
             result = _match(pi, qi + 1)
-            if not result and pi < len(path_parts):
-                result = _match(pi + 1, qi)
+            if not result and pi < path_len:
+                # Optimized iterative attempt to match the rest
+                for i in range(pi + 1, path_len + 1):
+                    if _match(i, qi + 1):
+                        result = True
+                        break
             memo[key] = result
             return result
 
-        if pi >= len(path_parts):
+        if pi >= path_len:
             memo[key] = False
             return False
 
-        # Use platform-aware fnmatch semantics so Windows matching remains
-        # case-insensitive, consistent with prior glob.glob() behavior.
-        result = fnmatch.fnmatch(path_parts[pi], current) and _match(pi + 1, qi + 1)
+        # Avoid fnmatch if there are no wildcards, but preserve normcase for Windows
+        if "*" not in current and "?" not in current and "[" not in current:
+            import os
+            # Note fnmatch normalizes both arguments using os.path.normcase
+            result = (os.path.normcase(path_parts[pi]) == os.path.normcase(current)) and _match(pi + 1, qi + 1)
+        else:
+            # Use platform-aware fnmatch semantics so Windows matching remains
+            # case-insensitive, consistent with prior glob.glob() behavior.
+            result = fnmatch.fnmatch(path_parts[pi], current) and _match(pi + 1, qi + 1)
+
         memo[key] = result
         return result
 
