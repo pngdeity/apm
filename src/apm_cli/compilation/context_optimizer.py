@@ -7,7 +7,6 @@ following the Minimal Context Principle.
 
 import builtins
 import fnmatch
-import glob
 import os
 import time
 from collections import defaultdict
@@ -24,6 +23,7 @@ from ..output.models import (
     PlacementSummary,
     ProjectAnalysis,
 )
+from ..primitives.discovery import _glob_match
 from ..primitives.models import Instruction
 from ..utils.exclude import should_exclude, validate_exclude_patterns
 from ..utils.paths import portable_relpath
@@ -135,8 +135,6 @@ class ContextOptimizer:
         self._pattern_cache: builtins.dict[str, builtins.set[Path]] = {}
 
         # Performance optimization caches
-        self._glob_cache: builtins.dict[str, builtins.list[str]] = {}
-        self._glob_set_cache: builtins.dict[str, builtins.set[Path]] = {}
         self._file_list_cache: builtins.list[Path] | None = None
         self._inheritance_cache: builtins.dict[Path, builtins.list[Path]] = {}  # (#171)
         self._timing_enabled = False
@@ -170,17 +168,6 @@ class ContextOptimizer:
         if self._timing_enabled and hasattr(self, "_verbose") and self._verbose:
             print(f"  {phase_name}: {duration * 1000:.1f}ms")
         return result
-
-    def _cached_glob(self, pattern: str) -> builtins.list[str]:
-        """Cache glob results to avoid repeated filesystem scans."""
-        if pattern not in self._glob_cache:
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(str(self.base_dir))  # Convert Path to string for os.chdir
-                self._glob_cache[pattern] = glob.glob(pattern, recursive=True)
-            finally:
-                os.chdir(old_cwd)
-        return self._glob_cache[pattern]
 
     def _get_all_files(self) -> builtins.list[Path]:
         """Get cached list of all files in project."""
@@ -738,29 +725,27 @@ class ContextOptimizer:
         expanded_patterns = self._expand_glob_pattern(pattern)
 
         for expanded_pattern in expanded_patterns:
-            # For patterns with **, use cached glob results
+            # For patterns with **, use _glob_match for fast, non-IO segment matching
             if "**" in expanded_pattern:
                 try:
-                    # Resolve both paths to handle symlinks and path inconsistencies
+                    # Compute relative path as a forward-slash string
+                    # Fallback to absolute paths when file is outside base_dir isn't useful for matching
                     resolved_file = file_path.resolve()
                     rel_path = resolved_file.relative_to(self.base_dir.resolve())
-
-                    # Use cached glob results instead of repeated glob calls
-                    matches = self._cached_glob(expanded_pattern)
-                    # Use cached Set[Path] to avoid recreating on every call
-                    if expanded_pattern not in self._glob_set_cache:
-                        self._glob_set_cache[expanded_pattern] = {Path(match) for match in matches}
-                    if rel_path in self._glob_set_cache[expanded_pattern]:
+                    rel_str = rel_path.as_posix()
+                    if _glob_match(rel_str, expanded_pattern):
                         return True
                 except (ValueError, OSError):
                     pass
             else:
                 # For non-recursive patterns, use fnmatch as before
                 try:
-                    rel_str = portable_relpath(file_path, self.base_dir)
+                    resolved_file = file_path.resolve()
+                    rel_path = resolved_file.relative_to(self.base_dir.resolve())
+                    rel_str = rel_path.as_posix()
                     if fnmatch.fnmatch(rel_str, expanded_pattern):
                         return True
-                except ValueError:
+                except (ValueError, OSError):
                     pass
 
                 # Only use filename match for patterns without directory structure
