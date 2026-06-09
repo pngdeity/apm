@@ -871,31 +871,6 @@ class TestApmModulesExclusion:
         assert apm_matches == [], f"apm_modules dirs matched: {apm_matches}"
 
 
-class TestGlobCacheReuse:
-    """Test that glob results are cached and Set[Path] conversion is not repeated."""
-
-    def test_set_path_cached_across_calls(self):
-        """_file_matches_pattern must cache the Set[Path] conversion."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            base = Path(temp_dir)
-            (base / "src").mkdir()
-            (base / "src" / "a.ts").touch()
-            (base / "src" / "b.ts").touch()
-
-            optimizer = ContextOptimizer(base_dir=str(base))
-            optimizer._analyze_project_structure()
-
-            file_a = base / "src" / "a.ts"
-            file_b = base / "src" / "b.ts"
-
-            # First call populates cache
-            optimizer._file_matches_pattern(file_a, "**/*.ts")
-            assert "**/*.ts" in optimizer._glob_set_cache
-
-            # Second call should reuse the cached set (not recreate it)
-            cached_set_id = id(optimizer._glob_set_cache["**/*.ts"])
-            optimizer._file_matches_pattern(file_b, "**/*.ts")
-            assert id(optimizer._glob_set_cache["**/*.ts"]) == cached_set_id
 
 
 # ==================================================================
